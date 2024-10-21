@@ -1,9 +1,13 @@
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from models import SessionLocal, Manga, User, Review, Chapter, Comment
 from typing import Optional, List
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, APIRouter, Depends, HTTPException, Response, status, Cookie
+from passlib.context import CryptContext
 from passlib.handlers.bcrypt import bcrypt
 from sqlalchemy.orm import Session
-from models import SessionLocal, Manga, User, Review, Chapter, Comment
 from pydantic import BaseModel, EmailStr
+
+
 
 app = FastAPI()
 
@@ -16,9 +20,16 @@ def get_db():
         db.close()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
+
+def verify_password(plain_password: str, password_hash: str) -> bool:
+    return pwd_context.verify(plain_password, password_hash)
+
+def get_user(db: Session, email: str):
+    return db.query(User).filter(User.email == email).first()
 
 class MangaCreate(BaseModel):
     title: str
@@ -83,6 +94,7 @@ class UserCreate(BaseModel):
     password: str
     email: EmailStr
 
+
 @app.post("/register")
 def register(user: UserCreate, db: Session = Depends(get_db)):
     # Проверка существующего пользователя
@@ -91,7 +103,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Username already registered")
 
     # Создание нового пользователя
-    new_user = User(username=user.username, password_hash=get_password_hash(user.password))
+    new_user = User(username=user.username,email =user.email, password_hash=get_password_hash(user.password))
 
     # Добавление в сессию и коммит
     db.add(new_user)
@@ -99,6 +111,23 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.refresh(new_user)
 
     return {"username": new_user.username}
+
+
+@app.post("/token")
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == form_data.username).first()
+
+    if not user or not verify_password(form_data.password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Incorrect username or password")
+
+    return {"access_token": user.username, "token_type": "bearer"}
+
+@app.get("/users/me")
+async def read_users_me(token: str = Depends(oauth2_scheme)):
+    user = get_user(token)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication credentials")
+    return user
 
 @app.get("/user/{user_id}")
 def read_users(db: Session = Depends(get_db)):
