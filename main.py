@@ -15,7 +15,8 @@ def get_db():
     finally:
         db.close()
 
-
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
 
 class MangaCreate(BaseModel):
     title: str
@@ -75,7 +76,29 @@ class CommentUpdate(BaseModel):
     manga_id: Optional[int] = None
     chapter_id: Optional[int] = None
 
-@app.get("/users/")
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    email: EmailStr
+
+@app.post("/register")
+def register(user: UserCreate, db: Session = Depends(get_db)):
+    # Проверка существующего пользователя
+    existing_user = db.query(User).filter(User.username == user.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+
+    # Создание нового пользователя
+    new_user = User(username=user.username, password_hash=get_password_hash(user.password))
+
+    # Добавление в сессию и коммит
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    return {"username": new_user.username}
+
+@app.get("/user/{user_id}")
 def read_users(db: Session = Depends(get_db)):
     users = db.query(User).all()
     return users
